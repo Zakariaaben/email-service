@@ -2,6 +2,7 @@ import { z } from "zod";
 
 type NodeEnv = "development" | "test" | "production";
 type LogLevel = "fatal" | "error" | "warn" | "info" | "debug" | "trace";
+type LogFormat = "json" | "pretty";
 
 type MailAuth = {
     user: string;
@@ -121,6 +122,19 @@ const parseLogLevel = (): LogLevel => {
     throw new Error(`Unsupported LOG_LEVEL "${raw}"`);
 };
 
+const parseLogFormat = (nodeEnv: NodeEnv): LogFormat => {
+    const raw = optional("LOG_FORMAT")?.toLowerCase() as LogFormat | undefined;
+    if (!raw) {
+        return nodeEnv === "production" ? "json" : "pretty";
+    }
+
+    if (raw === "json" || raw === "pretty") {
+        return raw;
+    }
+
+    throw new Error(`Unsupported LOG_FORMAT "${raw}"`);
+};
+
 const parsePort = (): number => {
     const value = optionalInteger("PORT") ?? 3000;
     if (value < 1 || value > 65535) {
@@ -227,13 +241,16 @@ const mailConfig: MailConfig = {
     },
 };
 
+const nodeEnv = parseNodeEnv();
+
 export const config = {
-    nodeEnv: parseNodeEnv(),
+    nodeEnv,
     port: parsePort(),
     logLevel: parseLogLevel(),
+    logFormat: parseLogFormat(nodeEnv),
     corsOrigins: parseCorsOrigins(),
     mail: mailConfig,
 } as const;
 
 export type AppConfig = typeof config;
-export type { MailTransport, MailAuth };
+export type { MailTransport, MailAuth, LogFormat };
