@@ -28,6 +28,13 @@ type SmtpTransport = BaseTransport & {
 
 type MailTransport = UrlTransport | SmtpTransport;
 
+type ExchangeConfig = {
+    url: string;
+    username: string;
+    password: string;
+    fromEmail: string;
+};
+
 type MailConfig = {
     apiKey: string;
     sender: {
@@ -39,6 +46,7 @@ type MailConfig = {
         connection: number;
         greeting: number;
     };
+    exchange?: ExchangeConfig;
 };
 
 const truthy = new Set(["1", "true", "yes", "y", "on"]);
@@ -231,6 +239,41 @@ const parseSender = (auth?: MailAuth): MailConfig["sender"] => {
 
 const { transport: mailTransport, auth: mailAuth } = parseMailTransport();
 
+const parseExchangeConfig = (): ExchangeConfig | undefined => {
+    const url = optional("EXCHANGE_URL");
+    const username = optional("EXCHANGE_USERNAME");
+    const password = optional("EXCHANGE_PASSWORD");
+    const fromEmail = optional("EXCHANGE_FROM_EMAIL");
+
+    // If any Exchange config is provided, all must be provided
+    if (url || username || password || fromEmail) {
+        if (!url) {
+            throw new Error("EXCHANGE_URL is required when using Exchange configuration");
+        }
+        if (!username) {
+            throw new Error("EXCHANGE_USERNAME is required when using Exchange configuration");
+        }
+        if (!password) {
+            throw new Error("EXCHANGE_PASSWORD is required when using Exchange configuration");
+        }
+        if (!fromEmail) {
+            throw new Error("EXCHANGE_FROM_EMAIL is required when using Exchange configuration");
+        }
+
+        validateUrl(url, "EXCHANGE_URL");
+        z.string().email().parse(fromEmail);
+
+        return {
+            url,
+            username,
+            password,
+            fromEmail,
+        };
+    }
+
+    return undefined;
+};
+
 const mailConfig: MailConfig = {
     apiKey: required("MAIL_SERVICE_API_KEY"),
     sender: parseSender(mailAuth),
@@ -239,6 +282,7 @@ const mailConfig: MailConfig = {
         connection: 10_000,
         greeting: 10_000,
     },
+    exchange: parseExchangeConfig(),
 };
 
 const nodeEnv = parseNodeEnv();

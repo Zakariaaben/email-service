@@ -36,8 +36,8 @@ export const registerEmailRoutes = (app: Hono<AppBindings>) => {
 
         void (async () => {
             try {
-                const info = await sendMail(payload);
-                logger.info({ requestId, messageId: info.messageId }, "Email sent successfully");
+                await sendMail(payload);
+                logger.info({ requestId }, "Email sent successfully");
             } catch (error: unknown) {
                 if (error instanceof MailSendError) {
                     logger.error({ requestId, err: error }, "Failed to send email");

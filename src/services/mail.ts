@@ -1,5 +1,10 @@
-import nodemailer from "nodemailer";
-import type { SentMessageInfo, Transporter } from "nodemailer";
+import {
+    EWSConfigError,
+    EWSConnectionError,
+    EWSSendError,
+    sendEmailViaEWS,
+    type EWSEmailPayload,
+} from "./ews-service";
 import { config } from "../config/env";
 import { logger } from "../logging";
 
@@ -17,74 +22,83 @@ export class MailSendError extends Error {
     }
 }
 
-let transporter: Transporter | null = null;
+const DEFAULT_SUBJECT_PREFIX = "[Djazairmed]";
 
-const getTransporter = (): Transporter => {
-    if (!transporter) {
-        const transport = config.mail.transport;
-        const sharedOptions = {
-            connectionTimeout: config.mail.timeouts.connection,
-            greetingTimeout: config.mail.timeouts.greeting,
-            ...(transport.requireTLS === undefined ? {} : { requireTLS: transport.requireTLS }),
-            ...(transport.auth ? { auth: transport.auth } : {}),
-        };
-
-        if (transport.type === "url") {
-            transporter = nodemailer.createTransport(transport.connectionUrl, sharedOptions);
-        } else {
-            transporter = nodemailer.createTransport({
-                host: transport.host,
-                port: transport.port,
-                secure: transport.secure,
-                ...sharedOptions,
-            });
-        }
-    }
-
-    return transporter;
-};
+const logPrefix = "[mail]";
 
 export const verifyMailTransporter = async (): Promise<void> => {
     try {
-        await getTransporter().verify();
-        const transport = config.mail.transport;
-        const label = transport.type === "url"
-            ? "connection-url"
-            : `${transport.host}:${transport.port}`;
-        logger.info({ transport: label }, "Mail transporter verified");
+        // Verify that Exchange configuration exists
+        if (!config.mail.exchange) {
+            throw new Error("Exchange configuration is not set");
+        }
+
+        logger.info({
+            exchangeUrl: config.mail.exchange.url,
+            exchangeUser: config.mail.exchange.username
+        }, "Exchange configuration verified");
     } catch (error) {
-        logger.error({ err: error }, "Mail transporter verification failed");
-        throw new Error("Failed to verify mail transporter", { cause: error });
+        logger.error({ err: error }, "Exchange configuration verification failed");
+        throw new Error("Failed to verify Exchange configuration", { cause: error });
     }
 };
 
-export const sendMail = async ({ to, subject, text, html }: SendMailInput): Promise<SentMessageInfo> => {
-    const fromHeader = config.mail.sender.name
-        ? `${config.mail.sender.name} <${config.mail.sender.address}>`
-        : config.mail.sender.address;
+export const sendMail = async ({ to, subject, text, html }: SendMailInput): Promise<void> => {
+    if (!html && !text) {
+        const message = "Missing email content (html/text)";
+        logger.error({ to, subject }, message);
+        throw new MailSendError(message);
+    }
 
-    const mailOptions = {
-        from: fromHeader,
+    // Prefix subject with [Djazairmed] if not already present
+    const prefixedSubject = subject.startsWith(DEFAULT_SUBJECT_PREFIX)
+        ? subject
+        : `${DEFAULT_SUBJECT_PREFIX} ${subject}`;
+
+    const fromName = config.mail.sender.name;
+
+    const payload: EWSEmailPayload = {
         to,
-        subject,
-        text,
-        html,
-    } as const;
+        subject: prefixedSubject,
+        fromName,
+        ...(text ? { text } : {}),
+        ...(html ? { html } : {}),
+    };
 
     try {
-        const info = await getTransporter().sendMail(mailOptions);
-        logger.info({
-            messageId: info.messageId,
-            envelope: info.envelope,
-            accepted: info.accepted,
-            rejected: info.rejected,
-        }, "Email dispatched");
-        return info;
+        await sendEmailViaEWS(payload);
+        logger.info({ to, subject: prefixedSubject }, "Mail dispatched via Exchange");
     } catch (error) {
-        logger.error({
-            err: error,
-            to,
-        }, "Failed to send email through transporter");
+        if (error instanceof EWSConfigError) {
+            logger.error({
+                to,
+                subject,
+                name: error.name,
+                message: error.message,
+            }, "Exchange configuration error");
+        } else if (error instanceof EWSConnectionError) {
+            logger.error({
+                to,
+                subject,
+                name: error.name,
+                message: error.message,
+                cause: error.cause,
+            }, "Exchange connection error");
+        } else if (error instanceof EWSSendError) {
+            logger.error({
+                to,
+                subject,
+                name: error.name,
+                message: error.message,
+                cause: error.cause,
+            }, "Exchange send error");
+        } else {
+            logger.error({
+                to,
+                subject,
+                err: error,
+            }, "Unexpected error while sending email");
+        }
         throw new MailSendError("Failed to send email", { cause: error });
     }
 };
