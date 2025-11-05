@@ -12,6 +12,7 @@ const mailRequestSchema = z
         subject: z.string().min(2).max(120),
         text: z.string().min(2).max(1000).optional(),
         html: z.string().min(2).max(5000).optional(),
+        provider: z.enum(["smtp", "ews"]).optional(),
     })
     .refine((payload) => payload.text || payload.html, {
         message: "Either text or html must be provided",
@@ -32,7 +33,12 @@ export const registerEmailRoutes = (app: Hono<AppBindings>) => {
 
         const payload = c.req.valid("json") as MailRequest;
 
-        logger.info({ requestId, to: payload.to, subject: payload.subject }, "Email accepted for background send");
+        logger.info({
+            requestId,
+            to: payload.to,
+            subject: payload.subject,
+            provider: payload.provider ?? config.mail.defaultProvider
+        }, "Email accepted for background send");
 
         void (async () => {
             try {

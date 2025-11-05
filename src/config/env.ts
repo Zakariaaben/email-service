@@ -35,6 +35,8 @@ type ExchangeConfig = {
     fromEmail: string;
 };
 
+type MailProvider = "smtp" | "ews";
+
 type MailConfig = {
     apiKey: string;
     sender: {
@@ -47,6 +49,7 @@ type MailConfig = {
         greeting: number;
     };
     exchange?: ExchangeConfig;
+    defaultProvider: MailProvider;
 };
 
 const truthy = new Set(["1", "true", "yes", "y", "on"]);
@@ -274,6 +277,20 @@ const parseExchangeConfig = (): ExchangeConfig | undefined => {
     return undefined;
 };
 
+const parseDefaultProvider = (): MailProvider => {
+    const raw = optional("MAIL_PROVIDER")?.toLowerCase();
+    if (!raw) {
+        // Default to EWS if Exchange config exists, otherwise SMTP
+        return parseExchangeConfig() ? "ews" : "smtp";
+    }
+
+    if (raw === "smtp" || raw === "ews") {
+        return raw;
+    }
+
+    throw new Error(`Unsupported MAIL_PROVIDER "${raw}". Must be "smtp" or "ews"`);
+};
+
 const mailConfig: MailConfig = {
     apiKey: required("MAIL_SERVICE_API_KEY"),
     sender: parseSender(mailAuth),
@@ -283,6 +300,7 @@ const mailConfig: MailConfig = {
         greeting: 10_000,
     },
     exchange: parseExchangeConfig(),
+    defaultProvider: parseDefaultProvider(),
 };
 
 const nodeEnv = parseNodeEnv();
@@ -297,4 +315,4 @@ export const config = {
 } as const;
 
 export type AppConfig = typeof config;
-export type { MailTransport, MailAuth, LogFormat };
+export type { MailTransport, MailAuth, LogFormat, MailProvider };
